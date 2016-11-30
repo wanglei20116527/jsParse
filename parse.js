@@ -338,25 +338,24 @@ AST.prototype = {
 		var statements = [];
 		
 		while (this.tokens.length > 0) {
-			if (this.isString() 
-				|| this.isNumber() 
-				|| this.isIdentifier() 
-				|| this.isLeftParenthesis()) {
-				statements.push(this.statement());
-
-				if (this.isSemicolon()) {
-					this.skip();
-				} else {
-					throw new Error("program: expect token: semicolon");
-				}
-
-			} else {
-				throw new Error("program: expect token: string, number, identifier, left parenthesis");
+			if (!this.isString() 
+				&& !this.isNumber() 
+				&& !this.isIdentifier() 
+				&& !this.isLeftParenthesis()) {
+				throw new Error("program: expect token: string number identifier (");
 			}
+
+			statements.push(this.statement());
+
+			if (!this.isSemicolon()) {
+				throw new Error("program: expect token: ;");		
+			}
+
+			this.skip();
 		}
 
 		return {
-			type: AST.PROGRAM,
+			type: AST.TYPE.PROGRAM,
 			statements: statements
 		};
 	},
@@ -365,27 +364,28 @@ AST.prototype = {
 		var expressions = [];
 
 		while (this.tokens.length > 0) {
-			if (this.isString() 
-				|| this.isNumber() 
-				|| this.isIdentifier() 
-				|| this.isLeftParenthesis()) {
-				expressions.push(this.expression());
-
-				if (this.isComma()) {
-					this.skip();
-				} else if (this.isSemicolon() || this.isRightParentthesis()) {
-					break;
-				} else {
-					throw new Error("statement: expect token: comma, semicolon");
-				}
-				
-			} else {
-				throw new Error("statement: expect token: string, number, identifier, left parenthesis");
+			if (!this.isString() 
+				&& !this.isNumber() 
+				&& !this.isIdentifier() 
+				&& !this.isLeftParenthesis()) {
+				throw new Error("statement: expect token: string number identifier (");
 			}
+
+			expressions.push(this.expression());
+
+			if (this.isSemicolon() || this.isRightParentthesis()) {
+				break;
+			}
+
+			if (!this.isComma()) {
+				throw new Error("statement: expect token: ; ) ,");
+			}
+
+			this.skip();
 		}
 
 		return {
-			type: AST.STATEMENT,
+			type: AST.TYPE.STATEMENT,
 			expressions: expressions 
 		};
 	},
@@ -395,7 +395,7 @@ AST.prototype = {
 			&& !this.isNumber() 
 			&& !this.isIdentifier() 
 			&& !this.isLeftParenthesis()) {
-			throw new Error("expression: expect token: string, number, identifier, left parenthesis");
+			throw new Error("expression: expect token: string number identifier (");
 		}
 
 		var addExpression = this.additive();
@@ -433,7 +433,7 @@ AST.prototype = {
 			&& !this.isNumber() 
 			&& !this.isIdentifier() 
 			&& !this.isLeftParenthesis()) {
-			throw new Error("additive: expect token: string, number, identifier, left parenthesis");
+			throw new Error("additive: expect token: string number identifier (");
 		}
 
 		var multipleExpression = this.multiplicative();
@@ -453,7 +453,7 @@ AST.prototype = {
 				type: AST.TYPE.DYADIC_EXPRESSION,
 				operator: token.value,
 				left: multipleExpression,
-				right: this.additive();
+				right: this.additive()
 			};
 		}
 
@@ -486,7 +486,7 @@ AST.prototype = {
 				type: AST.TYPE.DYADIC_EXPRESSION,
 				operator: token.value,
 				left: factor,
-				right: this.multiplicative();
+				right: this.multiplicative()
 			};
 		}
 
@@ -501,7 +501,7 @@ AST.prototype = {
 				value: token.value
 			};
 
-		} else if (this.isString) {
+		} else if (this.isString()) {
 			var token = this.tokens.shift();
 			return {
 				type: AST.TYPE.STRING,
@@ -520,7 +520,7 @@ AST.prototype = {
 			
 			this.skip();
 			
-			var arguments = this.parseArguments();
+			var args = this.parseArguments();
 
 			if (!this.isRightParentthesis()) {
 				throw new Error("primary: expect token: )");
@@ -531,7 +531,7 @@ AST.prototype = {
 			return {
 				type: AST.TYPE.CALL_EXPRESSION,
 				identifier: token.value,
-				arguments: arguments
+				args: args
 			};
 
 		} else if (this.isLeftParenthesis()) {
@@ -565,18 +565,18 @@ AST.prototype = {
 			return [];
 		}
 
-		var arguments = [];
+		var args = [];
 
-		arguments.push(this.expression());
+		args.push(this.expression());
 
 		if (this.isRightParentthesis()) {
-			return arguments;
+			return args;
 		}
 
 		if (this.isComma()) {
 			this.skip();
 
-			return arguments.concat(this.parseArguments());
+			return args.concat(this.parseArguments());
 		}
 
 		throw new Error("parseArguments: expect token: ) ,");
@@ -601,7 +601,7 @@ AST.prototype = {
 		var token = this.tokens[0];
 
 		return token.type === Lexer.TYPE.OPERATOR 
-				&& (token.value === "+" || token.value === "/");
+				&& (token.value === "*" || token.value === "/");
 	},
 
 	isColon: function () {
@@ -659,7 +659,169 @@ AST.prototype = {
 	}
 };
 
-window.Lexer = Lexer;
-window.AST   = AST;
+var Compile = function Compile (ast) {
+	this.ast = ast;
+};
+
+Compile.prototype = {
+	constructor: Compile,
+
+	compile: function (text) {
+		var self = this;
+
+		return function (scope) {
+			return self.execute(self.ast.ast(text), scope || {});
+		};
+	},
+
+	execute: function (astNode, scope) {
+		var ret = null;
+
+		switch (astNode.type) {
+			case AST.TYPE.IDENTIFIER:
+				ret = this.getIdentifierValue(astNode, scope);
+				break;
+
+			case AST.TYPE.NUMBER:
+				ret = this.getNumber(astNode, scope);
+				break;
+
+			case AST.TYPE.STRING:
+				ret = this.getString(astNode, scope);
+				break;
+
+			case AST.TYPE.CALL_EXPRESSION:
+				ret = this.executeCallExpression(astNode, scope);
+				break;
+
+			case AST.TYPE.CONDITION_EXPRESSION:
+				ret = this.executeConditionExpression(astNode, scope);
+				break;
+
+			case AST.TYPE.DYADIC_EXPRESSION:
+				ret = this.executeDyadicExpression(astNode, scope);
+				break;
+
+			case AST.TYPE.STATEMENT:
+				ret = this.executeStatement(astNode, scope);
+				break;
+
+			case AST.TYPE.PROGRAM:
+				ret = this.executeProgram(astNode, scope);
+				break;
+
+			default:
+				throw new Error("ast node type invalid: " + astNode.type);
+		}
+
+		return ret;
+	},
+
+	executeProgram: function (astNode, scope) {
+		var statements = astNode.statements;
+
+		var ret = undefined;
+
+		for (var i = 0, len = statements.length; i < len; ++i) {
+			ret = this.execute(statements[i], scope);
+		}
+
+		return ret;
+	},
+
+	executeStatement: function (astNode, scope) {
+		var expressions = astNode.expressions;
+
+		var ret = undefined;
+
+		for (var i = 0, len = expressions.length; i < len; ++i) {
+			ret = this.execute(expressions[i], scope);
+		}
+
+		return ret;
+	},
+
+	executeCallExpression: function (astNode, scope) {
+		var args = astNode.args;
+
+		for (var i = 0, len = args.length; i < len; ++i) {
+			args[i] = this.execute(args[i], scope); 
+		}
+
+		var func = scope[astNode.identifier];
+
+		return func.apply(scope, args);
+	},
+
+	executeConditionExpression: function (astNode, scope) {
+		var expressions = astNode.expressions;
+
+		var condition  = this.execute(expressions[0], scope);
+		var expression = Boolean(condition) ? expressions[1] : expressions[2];
+
+		return this.execute(expression, scope);
+	},
+
+	executeDyadicExpression: function (astNode, scope) {
+		var left  = this.execute(astNode.left, scope);
+		var right = this.execute(astNode.right, scope);
+
+		var ret = null;
+
+		switch (astNode.operator) {
+			case "+":
+				ret = left + right;
+				break;
+
+			case "-":
+				ret = left - right;
+				break;
+
+			case "*":
+				ret = left * right;
+				break;
+
+			case "/":
+				ret = left / right;
+				break;
+
+			default: 
+				throw new Error("executeDyadicExpression: invalid operator " + astNode.operator);
+		}
+
+		return ret;
+	},
+
+	getIdentifierValue: function (astNode, scope) {
+		return scope[astNode.value];
+	},
+
+	getNumber: function (astNode, scope) {
+		return astNode.value;
+	},
+
+	getString: function (astNode, scope) {
+		return astNode.value;
+	}
+};
+
+var Parser = function Parser() {
+	this.lexer   = new Lexer();
+	this.ast     = new AST(this.lexer);
+	this.astCompile = new Compile(this.ast); 
+};
+
+Parser.prototype = {
+	constructor: Parser,
+
+	parse: function (text) {
+		return this.astCompile.compile(text)
+	}
+};
+
+window.Lexer   = Lexer;
+window.AST     = AST;
+window.Compile = Compile;
+window.Parser  = Parser;
 
 })(window, document);
